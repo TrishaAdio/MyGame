@@ -1,0 +1,26 @@
+# Frame-counted logic in the platformer build (a9, 352x416).
+# Found with ProbePatcher + RmwFinder + CallTracePatcher, reviewed by hand, and checked by
+# comparing logged player trajectories between Original and Smooth modes.
+#
+# <class> <method> <desc> <owner.field> <occurrence> <gate|scale>
+# <class> <method> <desc> HELPER <timestep field>       velocity helper: original step, once per original frame
+# <class> <method> <desc> RESYNC <owner.name(desc)> <occ>  restart the original-frame clock before this call
+
+# Acceleration/gravity helper used for every entity: n = clamp(n +/- accel*dt, cap)
+f a (IIIZ)I HELPER m.h
+# Jump/flutter impulse: the next velocity update must land exactly one original frame later
+f b (III)Z RESYNC f.d(I)V 0
+
+# Countdown timer: E-- every frame while > 0
+f a (Z)I f.E 0 scale
+# Over-speed braking: t -= C (or D) every frame while |t| > B
+f a (Z)I f.t 2 gate
+# Coasting friction with no direction held: t += X / t -= X every frame
+f a (Z)I f.t 15 gate
+f a (Z)I f.t 17 gate
+# Velocity damping: t -= t * 6 / 24 every frame
+f e ()Z f.t 0 gate
+# Story text scroll: O -= 4 every frame
+m t ()V m.O 1 scale
+# Paint frame counter (blinking, cycling effects)
+o paint (Ljavax/microedition/lcdui/Graphics;)V o.n 0 scale
