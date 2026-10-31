@@ -416,11 +416,6 @@ public final class CastleOfMagicPC implements Menu.Host
 			return false;
 		}
 
-		Pacer.origMs = edition.origMs;
-		Pacer.origW = 16;
-		Pacer.stepW = settings.stepW();
-		Pacer.smooth = settings.smooth();
-
 		Mobile.setPlatform(new MobilePlatform(edition.width, edition.height), () -> { });
 		MobilePlatform platform = Mobile.getPlatform();
 		platform.dataPath = "saves" + File.separator + edition.id + File.separator; // separate saves per version
@@ -435,7 +430,7 @@ public final class CastleOfMagicPC implements Menu.Host
 		Mobile.config.settings.put("scrheight", "" + edition.height);
 		Mobile.config.settings.put("phone", "Standard");
 		Mobile.config.settings.put("rotate", "0");
-		Mobile.config.settings.put("fps", "0");          // pacing is done by Pacer, not by the runtime's limiter
+		Mobile.config.settings.put("fps", "0");          // no extra limiter: the game paces itself, exactly as on the phone
 		Mobile.config.settings.put("fpshack", "Disabled");
 		Mobile.config.sysSettings.put("sound", settings.sound ? "on" : "off");
 		Mobile.config.sysSettings.put("fpsCounterPosition", "Off");

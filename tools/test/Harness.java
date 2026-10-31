@@ -13,7 +13,6 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public class Harness {
     static final AtomicLong frames = new AtomicLong();
-    static final boolean PROBE = Boolean.getBoolean("probe");
     static java.io.PrintWriter log; static long logT0;
     static java.lang.reflect.Field fPlayer; static java.lang.reflect.Field[] fVals;
     static void logState() {
@@ -41,7 +40,7 @@ public class Harness {
         String script = a[4];
 
         Mobile.setPlatform(new MobilePlatform(w, h), new Runnable() { public void run() {} });
-        Mobile.getPlatform().setPainter(new Runnable() { public void run() { frames.incrementAndGet(); if (PROBE) org.recompile.castle.Probe.frame(); if (log != null) logState(); org.recompile.castle.Probe.traceFrame(); } });
+        Mobile.getPlatform().setPainter(new Runnable() { public void run() { frames.incrementAndGet(); if (log != null) logState(); } });
         if (!Mobile.getPlatform().load(new File(jar).toURI().toString())) { System.out.println("LOAD FAILED"); System.exit(2); }
         Mobile.config.settings.put("scrwidth", "" + w);
         Mobile.config.settings.put("scrheight", "" + h);
@@ -49,9 +48,6 @@ public class Harness {
         Mobile.config.sysSettings.put("sound", "off");
         Mobile.updateSettings();
         Mobile.getPlatform().resizeLCD(w, h);
-        org.recompile.castle.Pacer.smooth = Boolean.parseBoolean(System.getProperty("smooth","false"));
-        org.recompile.castle.Pacer.stepW = Integer.parseInt(System.getProperty("stepW","2"));
-        org.recompile.castle.Pacer.origMs = Integer.parseInt(System.getProperty("origMs","62"));
         Mobile.getPlatform().runJar();
 
         long t0 = System.currentTimeMillis();
@@ -72,10 +68,6 @@ public class Harness {
                 MobilePlatform.keyPressed(k); Thread.sleep(Long.parseLong(p[1])); MobilePlatform.keyReleased(k);
             } else if (c == 'L') { logT0 = System.currentTimeMillis(); log = new java.io.PrintWriter(out + "_" + arg + ".csv");
             } else if (c == 'E') { java.io.PrintWriter l = log; log = null; l.close();
-            } else if (c == 'T') { org.recompile.castle.Probe.traceStart(out + "_" + arg + ".trace");
-            } else if (c == 'U') { org.recompile.castle.Probe.traceStop();
-            } else if (c == 'P') { org.recompile.castle.Probe.start();
-            } else if (c == 'D') { org.recompile.castle.Probe.dump(out + "_" + arg + ".probe");
             } else if (c == 's') {
                 BufferedImage img = Mobile.getPlatform().getLcdFrontbuffer().getCanvas();
                 BufferedImage copy = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_INT_RGB);

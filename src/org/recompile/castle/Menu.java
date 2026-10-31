@@ -39,7 +39,7 @@ final class Menu
 
 	static final int VW = 480, VH = 640;
 
-	private enum Item { PLAY, EDITION, FRAMERATE, DISPLAY, SIZE, FILTER, VSYNC, SOUND, FPS, CONTROLS, RESTART, QUIT }
+	private enum Item { PLAY, EDITION, DISPLAY, SIZE, FILTER, VSYNC, SOUND, FPS, CONTROLS, RESTART, QUIT }
 
 	private final Settings s;
 	private final Host host;
@@ -77,7 +77,6 @@ final class Menu
 		items.clear();
 		items.add(Item.PLAY);
 		items.add(Item.EDITION);
-		items.add(Item.FRAMERATE);
 		items.add(Item.DISPLAY);
 		if (!s.fullscreen) { items.add(Item.SIZE); }
 		items.add(Item.FILTER);
@@ -127,13 +126,8 @@ final class Menu
 		{
 			case EDITION:
 				s.edition = Math.floorMod(s.edition + dir, Settings.EDITIONS.length);
-				s.smoothIndex = s.edition().smoothSteps.length > 0 ? 0 : -1;
 				s.windowScale = 0;
 				if (!started && !s.fullscreen) { host.displayChanged(); } // show the new screen size right away
-				break;
-			case FRAMERATE:
-				s.cycleFrameRate(dir);
-				applyPacer();
 				break;
 			case DISPLAY: s.fullscreen = !s.fullscreen; host.displayChanged(); break;
 			case SIZE:
@@ -153,13 +147,6 @@ final class Menu
 		if (started) { needsRestart = s.edition != startEdition || s.sound != startSound; }
 		s.save();
 		rebuild();
-	}
-
-	void applyPacer()
-	{
-		if (!host.gameStarted() || s.edition != startEdition) { return; }
-		Pacer.stepW = s.stepW();
-		Pacer.smooth = s.smooth();
 	}
 
 	/** Mouse support. Coordinates are canvas pixels. */
@@ -486,7 +473,6 @@ final class Menu
 		{
 			case PLAY: return host.gameStarted() ? "RESUME" : "PLAY";
 			case EDITION: return "Game version";
-			case FRAMERATE: return "Frame rate";
 			case DISPLAY: return "Display";
 			case SIZE: return "Window size";
 			case FILTER: return "Image";
@@ -505,7 +491,6 @@ final class Menu
 		switch (it)
 		{
 			case EDITION: return s.edition().name;
-			case FRAMERATE: return s.frameRateLabel();
 			case DISPLAY: return s.fullscreen ? "Fullscreen" : "Window";
 			case SIZE: return s.windowScale == 0 ? "Auto (" + host.autoWindowScale() + "x)" : s.windowScale + "x";
 			case FILTER: return Settings.FILTERS[s.filter];
@@ -523,12 +508,8 @@ final class Menu
 		{
 			case PLAY: return host.gameStarted() ? "Back to the game." : "Start Castle of Magic with these settings. Your choices are saved for next time.";
 			case EDITION:
-				return e.name + ": " + e.detail + "." + (e.smoothSteps.length == 0 ? " Runs at its original 16 FPS game speed." : " Supports smooth high frame rates.")
+				return e.name + ": " + e.detail + ". The original game, unmodified."
 					+ (host.gameStarted() && s.edition != startEdition ? " Needs a restart." : "") + " Each version keeps its own saves.";
-			case FRAMERATE:
-				if (e.smoothSteps.length == 0) { return "This version only runs at its original speed for now. Pick the HD Edition for up to 193 FPS."; }
-				return s.smooth() ? "The game draws " + Math.round(e.fpsFor(s.stepW())) + " new frames every second. Game speed, jumps and timers stay the same as the original."
-					: "The original phone frame rate, exactly as in 2008.";
 			case DISPLAY: return "Window or borderless fullscreen. Shortcut: F11 or Alt+Enter.";
 			case SIZE: return "Window size as a multiple of the game's " + e.width + "x" + e.height + " screen. You can also drag the window edges.";
 			case FILTER: return Settings.FILTER_INFO[s.filter];

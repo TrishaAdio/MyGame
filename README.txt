@@ -10,17 +10,10 @@ HOW TO PLAY
 No emulator to set up and no Java to install. Everything the game needs is in this folder.
 
 GAME VERSIONS (choose in the settings screen)
-  HD Edition      352x416. Side-scrolling levels. Runs at 193 FPS by default
-                  (also 96 FPS, 64 FPS for slower PCs, or the original 12 FPS).
+  HD Edition      352x416. Side-scrolling levels.
   Full Adventure  240x320. Castle hub world plus levels.
-                  Runs at its original 16 FPS game speed for now.
+  Both are the original 2008 game files, unmodified. They run at their original speed.
   Each version keeps its own save files (in the "saves" folder).
-
-HIGH FRAME RATE
-  The original game draws 12-16 pictures per second. In the HD Edition this PC version
-  patches the game's timing so it draws up to 193 per second. Walking speed, jump height,
-  timers and text speed were measured against the original and stay the same (within about 2%).
-  If anything ever feels off, set "Frame rate" to the original value.
 
 CONTROLS
   Move .................... Arrow keys or W A S D        (controller: D-pad / left stick)
