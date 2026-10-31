@@ -1,0 +1,7 @@
+Castle of Magic PC - ready to play
+
+1. Download CastleOfMagic-PC.zip
+2. Right-click it > Extract All
+3. Open the CastleOfMagic folder and double-click CastleOfMagic.exe
+
+Personal use only.
