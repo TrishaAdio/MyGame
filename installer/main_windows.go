@@ -29,7 +29,7 @@ import (
 
 const (
 	appName    = "Castle of Magic"
-	appVersion = "1.3"
+	appVersion = "1.4"
 	regKey     = `Software\Microsoft\Windows\CurrentVersion\Uninstall\CastleOfMagic`
 
 	mbYesNo         = 0x4

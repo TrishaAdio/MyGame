@@ -51,7 +51,7 @@ public class CoopNetTest
 			mp.join();
 			waitFor(() -> mp.inRoom() || !mp.error().isEmpty(), 30000);
 			System.out.println("GUEST joined room=" + mp.roomCode() + " error=" + mp.error());
-			waitFor(() -> mp.saveSynced(), 20000);
+			waitFor(() -> mp.saveSynced(), 40000);
 			System.out.println("GUEST save: " + mp.saveNote());
 		}
 

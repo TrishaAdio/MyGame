@@ -154,12 +154,13 @@ final class RoomClient
 			try
 			{
 				listener.onStatus(attempt == 0 ? "Connecting..." : "Reconnecting...", false);
-				socket = http.newWebSocketBuilder()
+				WebSocket opened = http.newWebSocketBuilder()
 					.connectTimeout(Duration.ofSeconds(30))
 					.header("X-Access-Key", accessKey)
 					.header("Authorization", "Bearer " + r.token)
 					.buildAsync(URI.create(ws), new Handler())
 					.get(40, TimeUnit.SECONDS);
+				socket = opened; // normally already set in onOpen
 				attempt = 0;
 			}
 			catch (Exception e)
@@ -198,6 +199,7 @@ final class RoomClient
 
 		@Override public void onOpen(WebSocket ws)
 		{
+			socket = ws; // set before any message is handled, so replies can be sent right away
 			listener.onStatus("Connected", true);
 			ws.request(1);
 		}

@@ -63,6 +63,27 @@ final class MultiSession implements RoomClient.Listener
 	boolean friendOnline() { return friendOnline && client != null && client.connected(); }
 	boolean saveSynced() { return saveSynced; }
 	boolean waitingForSave() { return inRoom() && !isHost() && saveRequested && !saveSynced; }
+
+	private volatile long saveRequestStarted, saveRequestLastSent;
+	private static final long SAVE_RETRY_MS = 3000, SAVE_GIVE_UP_MS = 25000;
+
+	/** Called by the sender thread: repeat the progress request until the host answers, then give up. */
+	private void retrySaveRequest(RoomClient c, long now)
+	{
+		if (!saveRequested || saveSynced) { return; }
+		if (now - saveRequestStarted > SAVE_GIVE_UP_MS)
+		{
+			saveRequested = false;
+			saveSynced = true;
+			saveNote = "The host's progress did not arrive, so you keep your own. You can press PLAY.";
+			toast(saveNote);
+			return;
+		}
+		if (now - saveRequestLastSent >= SAVE_RETRY_MS && c.connected() && friendOnline)
+		{
+			if (c.send(Json.of("type", "save-request"))) { saveRequestLastSent = now; }
+		}
+	}
 	String saveNote() { return saveNote; }
 
 	/** The friend's latest state, or null if we have not heard from them for a few seconds. */
@@ -144,6 +165,7 @@ final class MultiSession implements RoomClient.Listener
 				code = r.code;
 				if (joining) { settings.roomCode = r.code; settings.save(); }
 				saveSynced = false;
+				saveRequested = false;
 				saveNote = "";
 				phase = Phase.IN_ROOM;
 				status = "Connecting...";
@@ -191,6 +213,7 @@ final class MultiSession implements RoomClient.Listener
 				if (c == null) { return; }
 				String msg = outgoing.get();
 				long now = System.currentTimeMillis();
+				retrySaveRequest(c, now);
 				if (msg != null && c.connected() && (!msg.equals(last) || now - lastSent > 1000))
 				{
 					if (c.send(msg)) { last = msg; lastSent = now; }
@@ -289,9 +312,9 @@ final class MultiSession implements RoomClient.Listener
 			return;
 		}
 		saveRequested = true;
+		saveRequestStarted = System.currentTimeMillis();
+		saveRequestLastSent = 0; // the sender thread sends it, and repeats it until the host answers
 		saveNote = "Getting the host's progress...";
-		RoomClient c = client;
-		if (c != null) { c.send(Json.of("type", "save-request")); }
 	}
 
 	private void sendSave()
@@ -306,7 +329,7 @@ final class MultiSession implements RoomClient.Listener
 				for (Path p : (Iterable<Path>) walk.filter(Files::isRegularFile)::iterator)
 				{
 					byte[] data = Files.readAllBytes(p);
-					if (data.length > 200_000) { continue; }
+					if (data.length > 200_000 || files.length() > 300_000) { continue; }
 					String rel = root.relativize(p).toString().replace('\\', '/');
 					if (count++ > 0) { files.append(','); }
 					files.append(Json.of("path", rel, "data", Base64.getEncoder().encodeToString(data)));
@@ -327,6 +350,7 @@ final class MultiSession implements RoomClient.Listener
 	@SuppressWarnings("unchecked")
 	private void receiveSave(Map<String, Object> m)
 	{
+		if (saveSynced) { return; } // already have it (the request may have been sent more than once)
 		saveRequested = false;
 		if (gameStarted.getAsBoolean()) { saveNote = "Already playing, kept your own progress."; return; }
 		Object list = m.get("files");
