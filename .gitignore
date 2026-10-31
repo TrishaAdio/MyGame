@@ -1,0 +1,19 @@
+# Build outputs and downloaded dependencies
+build/
+.cache/
+dist/
+launcher/CastleOfMagic.exe
+launcher/*.syso
+
+# Original Gameloft game files are not stored in this repo
+*.jar
+*.zip
+
+# Runtime data created when playing
+settings.properties
+saves/
+rms/
+config/
+logs/
+screenshots/
+freej2me_system/
