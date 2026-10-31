@@ -8,28 +8,28 @@
 package main
 
 import (
-	"bytes"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
-	"syscall"
 	"time"
-	"unicode/utf16"
 	"unsafe"
 
+	ole "github.com/go-ole/go-ole"
+	"github.com/go-ole/go-ole/oleutil"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
 
 const (
 	appName    = "Castle of Magic"
-	appVersion = "1.1"
+	appVersion = "1.2"
 	regKey     = `Software\Microsoft\Windows\CurrentVersion\Uninstall\CastleOfMagic`
 
 	mbYesNo         = 0x4
@@ -38,11 +38,25 @@ const (
 	mbIconWarning   = 0x30
 	mbIconInfo      = 0x40
 	mbSetForeground = 0x10000
+	mbTopmost       = 0x40000
 	idYes           = 6
-	createNoWindow  = 0x08000000
 )
 
+var logPath = filepath.Join(os.TempDir(), "CastleOfMagic-setup.log")
+
 func main() {
+	if f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
+		log.SetOutput(f)
+		defer f.Close()
+	}
+	log.Printf("---- %s %s, args %v", appName, appVersion, os.Args)
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("CRASH: %v\n%s", r, debug.Stack())
+			msg(fmt.Sprintf("Setup crashed: %v\n\nDetails were saved in:\n%s", r, logPath), mbIconError)
+			os.Exit(1)
+		}
+	}()
 	if uninstallerBuild {
 		uninstall()
 		return
@@ -53,7 +67,8 @@ func main() {
 func msg(text string, flags uint32) int32 {
 	t, _ := windows.UTF16PtrFromString(text)
 	c, _ := windows.UTF16PtrFromString(appName + " Setup")
-	r, _ := windows.MessageBox(0, t, c, flags|mbSetForeground)
+	log.Printf("message: %q", strings.ReplaceAll(text, "\n", " "))
+	r, _ := windows.MessageBox(0, t, c, flags|mbSetForeground|mbTopmost)
 	return r
 }
 
@@ -81,102 +96,123 @@ func setup() {
 	}
 
 	done := showBusy("Installing " + appName + ", please wait...\n\nThis takes a few seconds.")
-	err := doInstall(dir)
+	iconNote, err := doInstall(dir)
 	done()
 	if err != nil {
-		msg("Setup could not finish.\n\n"+err.Error(), mbIconError)
+		log.Printf("install failed: %v", err)
+		msg("Setup could not finish.\n\n"+err.Error()+"\n\nLog file:\n"+logPath, mbIconError)
 		os.Exit(1)
 	}
-	if msg(appName+" is installed.\n\nTo play, double-click the \""+appName+"\" icon on your desktop.\n\nStart the game now?", mbYesNo|mbIconInfo) == idYes {
+	log.Printf("install finished")
+	if msg(appName+" is installed.\n\n"+iconNote+"\n\nStart the game now?", mbYesNo|mbIconInfo) == idYes {
 		cmd := exec.Command(filepath.Join(dir, "CastleOfMagic.exe"))
 		cmd.Dir = dir
 		_ = cmd.Start()
 	}
 }
 
-func doInstall(dir string) error {
+// doInstall copies the game and creates shortcuts. A missing shortcut is reported, not fatal.
+func doInstall(dir string) (string, error) {
+	log.Printf("installing into %s (%d MB payload)", dir, len(payload)>>20)
 	sizeKB, err := installFiles(payload, dir)
 	if errors.Is(err, errLocked) {
-		return errors.New(appName + " is running. Close the game, then run setup again.")
+		return "", errors.New(appName + " is running. Close the game, then run setup again.")
 	}
 	if err != nil {
-		return err
+		return "", err
 	}
+	log.Printf("files installed: %d MB", sizeKB>>10)
 	uninst := filepath.Join(dir, "uninstall.exe")
 	if err := os.WriteFile(uninst, uninstallerExe, 0o755); err != nil {
-		return fmt.Errorf("could not write the uninstaller: %v", err)
+		return "", fmt.Errorf("could not write the uninstaller: %v", err)
 	}
+	note := "To play, double-click the \"" + appName + "\" icon on your desktop."
 	links, err := makeShortcuts(dir)
 	if err != nil {
-		return fmt.Errorf("the game was installed, but the desktop icon could not be created:\n%v\n\nYou can start it from:\n%s", err, dir)
+		log.Printf("shortcuts failed: %v", err)
+		note = "The desktop icon could not be created (" + err.Error() + ").\nThe game is in:\n" + dir
+	} else {
+		log.Printf("shortcuts: %v", links)
 	}
 	if err := register(dir, links, sizeKB); err != nil {
-		return fmt.Errorf("the game was installed, but it could not be added to Installed apps: %v", err)
+		log.Printf("register failed: %v", err) // only affects the "Installed apps" entry
 	}
-	return nil
+	return note, nil
 }
 
-const shortcutScript = `
-$ErrorActionPreference = 'Stop'
-[Console]::OutputEncoding = [Text.Encoding]::UTF8
-$shell = New-Object -ComObject WScript.Shell
-$made = @()
-foreach ($folder in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) {
-  if (-not $folder) { continue }
-  $path = Join-Path $folder 'Castle of Magic.lnk'
-  $link = $shell.CreateShortcut($path)
-  $link.TargetPath = $env:COM_TARGET
-  $link.WorkingDirectory = $env:COM_DIR
-  $link.IconLocation = $env:COM_TARGET + ',0'
-  $link.Description = 'Play Castle of Magic'
-  $link.Save()
-  $made += $path
-}
-$made -join [char]10
-`
-
-// makeShortcuts creates the desktop and Start menu shortcuts and returns their paths.
-// Paths are passed through environment variables, never pasted into the script.
+// makeShortcuts creates desktop and Start menu shortcuts through the Windows Shell COM API
+// (no PowerShell or script host process) and returns their paths.
 func makeShortcuts(dir string) ([]string, error) {
-	out, err := powershell(shortcutScript,
-		"COM_TARGET="+filepath.Join(dir, "CastleOfMagic.exe"),
-		"COM_DIR="+dir)
-	if err != nil {
-		return nil, err
-	}
-	var links []string
-	for _, l := range strings.Split(out, "\n") {
-		if l = strings.TrimSpace(l); l != "" {
-			links = append(links, l)
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	if err := ole.CoInitializeEx(0, ole.COINIT_APARTMENTTHREADED); err != nil {
+		if oe, ok := err.(*ole.OleError); !ok || oe.Code() != 1 { // 1 = S_FALSE, already initialised
+			return nil, fmt.Errorf("COM: %v", err)
 		}
 	}
-	if len(links) == 0 {
-		return nil, errors.New("no shortcut was created")
+	defer ole.CoUninitialize()
+
+	unk, err := oleutil.CreateObject("WScript.Shell")
+	if err != nil {
+		return nil, fmt.Errorf("shell: %v", err)
 	}
-	return links, nil
+	defer unk.Release()
+	shell, err := unk.QueryInterface(ole.IID_IDispatch)
+	if err != nil {
+		return nil, fmt.Errorf("shell: %v", err)
+	}
+	defer shell.Release()
+
+	target := filepath.Join(dir, "CastleOfMagic.exe")
+	var made []string
+	var lastErr error
+	for _, id := range []*windows.KNOWNFOLDERID{windows.FOLDERID_Desktop, windows.FOLDERID_Programs} {
+		folder, err := windows.KnownFolderPath(id, 0)
+		if err != nil || folder == "" {
+			lastErr = fmt.Errorf("folder: %v", err)
+			continue
+		}
+		path := filepath.Join(folder, appName+".lnk")
+		if err := saveShortcut(shell, path, target, dir); err != nil {
+			lastErr = err
+			log.Printf("shortcut %s: %v", path, err)
+			continue
+		}
+		made = append(made, path)
+	}
+	if len(made) == 0 {
+		if lastErr == nil {
+			lastErr = errors.New("no shortcut was created")
+		}
+		return nil, lastErr
+	}
+	return made, nil
 }
 
-func powershell(script string, env ...string) (string, error) {
-	u := utf16.Encode([]rune(script))
-	b := make([]byte, len(u)*2)
-	for i, v := range u {
-		b[2*i] = byte(v)
-		b[2*i+1] = byte(v >> 8)
+func saveShortcut(shell *ole.IDispatch, path, target, dir string) error {
+	v, err := oleutil.CallMethod(shell, "CreateShortcut", path)
+	if err != nil {
+		return fmt.Errorf("create: %v", err)
 	}
-	exe := filepath.Join(os.Getenv("SystemRoot"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
-	if _, err := os.Stat(exe); err != nil {
-		exe = "powershell.exe"
+	link := v.ToIDispatch()
+	defer link.Release()
+	for name, value := range map[string]string{
+		"TargetPath":       target,
+		"WorkingDirectory": dir,
+		"IconLocation":     target + ",0",
+		"Description":      "Play " + appName,
+	} {
+		if _, err := oleutil.PutProperty(link, name, value); err != nil {
+			return fmt.Errorf("%s: %v", name, err)
+		}
 	}
-	cmd := exec.Command(exe, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-		"-EncodedCommand", base64.StdEncoding.EncodeToString(b))
-	cmd.Env = append(os.Environ(), env...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("%v %s", err, strings.TrimSpace(stderr.String()))
+	if _, err := oleutil.CallMethod(link, "Save"); err != nil {
+		return fmt.Errorf("save: %v", err)
 	}
-	return stdout.String(), nil
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("not found after saving: %v", err)
+	}
+	return nil
 }
 
 func register(dir string, links []string, sizeKB int) error {
@@ -213,7 +249,7 @@ func showBusy(text string) func() {
 		runtime.LockOSThread()
 		t, _ := windows.UTF16PtrFromString(text)
 		c, _ := windows.UTF16PtrFromString(title)
-		windows.MessageBox(0, t, c, mbIconInfo|mbSetForeground)
+		windows.MessageBox(0, t, c, mbIconInfo|mbSetForeground|mbTopmost)
 	}()
 	return func() {
 		user32 := windows.NewLazySystemDLL("user32.dll")
