@@ -17,3 +17,6 @@ config/
 logs/
 screenshots/
 freej2me_system/
+
+# Server dependencies
+node_modules/

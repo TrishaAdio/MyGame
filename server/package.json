@@ -1,0 +1,17 @@
+{
+  "name": "castle-of-magic-rooms",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Room and relay server for Castle of Magic PC two-player mode",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "ws": "^8.22.0"
+  }
+}
