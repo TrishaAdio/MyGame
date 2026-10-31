@@ -3,7 +3,10 @@
 A Windows PC package for Castle of Magic (Gameloft, 2008, J2ME). Personal use only.
 
 - Double-click `CastleOfMagic.exe`; a PC settings screen opens first (F1 reopens it in-game).
-- The original game files are used unchanged: HD Edition (352x416) and Full Adventure (240x320).
+- The original game files are used unchanged: Normal (240x320) and HD (352x416).
+- Online multiplayer (Normal version): each player runs their own game; the friend appears as a yellow hero
+  with a name tag when you are in the same place. Uses the room server in
+  [TrishaAdio/CastleApi](https://github.com/TrishaAdio/CastleApi). The host's save is copied to the friend on join.
 - GPU scaling with 4 filters, fullscreen/window, VSync, XInput controllers, FPS counter, screenshots.
 - Bundled Java runtime, so nothing needs to be installed.
 

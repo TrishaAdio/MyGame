@@ -39,7 +39,19 @@ final class Menu
 
 	static final int VW = 480, VH = 640;
 
-	private enum Item { PLAY, EDITION, DISPLAY, SIZE, FILTER, VSYNC, SOUND, FPS, CONTROLS, RESTART, QUIT }
+	private enum Item { PLAY, EDITION, MULTI, DISPLAY, SIZE, FILTER, VSYNC, SOUND, FPS, CONTROLS, RESTART, QUIT,
+		MP_NAME, MP_KEY, MP_CREATE, MP_CODE, MP_JOIN, MP_SERVER, MP_SERVERKEY, MP_ROOM, MP_FRIEND, MP_LEAVE, MP_BACK }
+
+	private static final java.util.EnumSet<Item> CENTERED = java.util.EnumSet.of(Item.PLAY, Item.QUIT, Item.CONTROLS, Item.RESTART,
+		Item.MP_CREATE, Item.MP_JOIN, Item.MP_LEAVE, Item.MP_BACK);
+	private static final java.util.EnumSet<Item> FIELDS = java.util.EnumSet.of(Item.MP_NAME, Item.MP_KEY, Item.MP_CODE, Item.MP_SERVER, Item.MP_SERVERKEY);
+
+	private MultiSession mp;
+	private boolean multiPage;
+	private MultiSession.Phase lastPhase;
+	private String notice = "";
+
+	synchronized void setMultiplayer(MultiSession session) { this.mp = session; rebuild(); }
 
 	private final Settings s;
 	private final Host host;
@@ -75,8 +87,34 @@ final class Menu
 	{
 		Item cur = items.isEmpty() ? null : items.get(Math.min(sel, items.size() - 1));
 		items.clear();
+		if (multiPage && mp != null)
+		{
+			lastPhase = mp.phase();
+			items.add(Item.PLAY);
+			items.add(Item.MP_NAME);
+			if (mp.phase() == MultiSession.Phase.IDLE)
+			{
+				items.add(Item.MP_KEY);
+				items.add(Item.MP_CREATE);
+				items.add(Item.MP_CODE);
+				items.add(Item.MP_JOIN);
+				items.add(Item.MP_SERVER);
+				items.add(Item.MP_SERVERKEY);
+			}
+			else if (mp.phase() == MultiSession.Phase.IN_ROOM)
+			{
+				items.add(Item.MP_ROOM);
+				items.add(Item.MP_FRIEND);
+				items.add(Item.MP_LEAVE);
+			}
+			items.add(Item.MP_BACK);
+			sel = cur == null ? 0 : Math.max(0, items.indexOf(cur));
+			if (cur != null && !items.contains(cur)) { sel = Math.min(sel, items.size() - 1); }
+			return;
+		}
 		items.add(Item.PLAY);
 		items.add(Item.EDITION);
+		if (mp != null) { items.add(Item.MULTI); }
 		items.add(Item.DISPLAY);
 		if (!s.fullscreen) { items.add(Item.SIZE); }
 		items.add(Item.FILTER);
@@ -89,7 +127,7 @@ final class Menu
 		sel = cur == null ? 0 : Math.max(0, items.indexOf(cur));
 	}
 
-	synchronized void opened() { controlsPage = false; rebuild(); }
+	synchronized void opened() { controlsPage = false; notice = ""; rebuild(); }
 
 	// ---------------------------------------------------------------- input
 
@@ -102,6 +140,7 @@ final class Menu
 	synchronized void back()
 	{
 		if (controlsPage) { controlsPage = false; return; }
+		if (multiPage) { multiPage = false; rebuild(); return; }
 		if (host.gameStarted()) { host.play(); }
 	}
 
@@ -111,7 +150,22 @@ final class Menu
 		Item it = items.get(sel);
 		switch (it)
 		{
-			case PLAY: s.save(); host.play(); break;
+			case PLAY:
+				if (mp != null && mp.waitingForSave()) { notice = "Wait a moment, getting the host's progress..."; break; }
+				if (mp != null && mp.inRoom() && !"adventure".equals(s.edition().id)) { notice = "Multiplayer needs the Normal version."; break; }
+				s.save(); host.play(); break;
+			case MULTI: multiPage = true; notice = ""; sel = 0; rebuild(); break;
+			case MP_BACK: multiPage = false; rebuild(); break;
+			case MP_CREATE: case MP_JOIN:
+				if (!"adventure".equals(s.edition().id)) { notice = "Multiplayer works in the Normal version. Change Game version first."; break; }
+				if (host.gameStarted() && it == Item.MP_JOIN) { notice = "Joining copies the host's progress, so join before pressing PLAY (restart the game first)."; break; }
+				s.save();
+				notice = "";
+				if (it == Item.MP_CREATE) { mp.create(); } else { mp.join(); }
+				break;
+			case MP_LEAVE: mp.leave(); notice = ""; break;
+			case MP_NAME: case MP_KEY: case MP_CODE: case MP_SERVER: case MP_SERVERKEY: case MP_ROOM: case MP_FRIEND:
+				sel = Math.min(sel + 1, items.size() - 1); break; // Enter moves to the next row
 			case CONTROLS: controlsPage = true; break;
 			case RESTART: s.save(); host.restart(); break;
 			case QUIT: s.save(); host.quit(); break;
@@ -149,6 +203,70 @@ final class Menu
 		rebuild();
 	}
 
+	// ---------------------------------------------------------------- text fields
+
+	synchronized boolean textSelected() { return !controlsPage && !items.isEmpty() && FIELDS.contains(items.get(sel)); }
+
+	synchronized void typed(char c)
+	{
+		if (!textSelected() || c < 32 || c == 127) { return; }
+		Item it = items.get(sel);
+		String v = fieldValue(it);
+		if (v.length() >= fieldLimit(it)) { return; }
+		if (it == Item.MP_CODE) { c = Character.toUpperCase(c); if (!Character.isLetterOrDigit(c)) { return; } }
+		setField(it, v + c);
+	}
+
+	synchronized void backspace()
+	{
+		if (!textSelected()) { return; }
+		Item it = items.get(sel);
+		String v = fieldValue(it);
+		if (!v.isEmpty()) { setField(it, v.substring(0, v.length() - 1)); }
+	}
+
+	synchronized void paste(String text)
+	{
+		if (!textSelected() || text == null) { return; }
+		Item it = items.get(sel);
+		String clean = text.replaceAll("[\\r\\n\\t]", "").trim();
+		if (it == Item.MP_CODE) { clean = clean.toUpperCase().replaceAll("[^A-Z0-9]", ""); }
+		String v = fieldValue(it) + clean;
+		setField(it, v.length() > fieldLimit(it) ? v.substring(0, fieldLimit(it)) : v);
+	}
+
+	private int fieldLimit(Item it)
+	{
+		switch (it) { case MP_NAME: return 20; case MP_CODE: return 8; case MP_SERVER: return 120; default: return 64; }
+	}
+
+	private String fieldValue(Item it)
+	{
+		switch (it)
+		{
+			case MP_NAME: return s.playerName;
+			case MP_KEY: return s.roomKey;
+			case MP_CODE: return s.roomCode;
+			case MP_SERVER: return s.serverUrl;
+			case MP_SERVERKEY: return s.serverKey;
+			default: return "";
+		}
+	}
+
+	private void setField(Item it, String v)
+	{
+		switch (it)
+		{
+			case MP_NAME: s.playerName = v; break;
+			case MP_KEY: s.roomKey = v; break;
+			case MP_CODE: s.roomCode = v; break;
+			case MP_SERVER: s.serverUrl = v; break;
+			case MP_SERVERKEY: s.serverKey = v; break;
+			default: return;
+		}
+		s.save();
+	}
+
 	/** Mouse support. Coordinates are canvas pixels. */
 	synchronized void mouseMoved(int x, int y)
 	{
@@ -163,7 +281,7 @@ final class Menu
 		if (row < 0) { return; }
 		sel = row;
 		Item it = items.get(row);
-		boolean valueItem = it != Item.PLAY && it != Item.CONTROLS && it != Item.QUIT && it != Item.RESTART;
+		boolean valueItem = !CENTERED.contains(it) && !FIELDS.contains(it) && it != Item.MULTI;
 		if (valueItem && button == 3) { change(it, -1); } // right click goes backwards
 		else { activate(); }
 	}
@@ -193,6 +311,7 @@ final class Menu
 		g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
 		g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
 
+		if (multiPage && mp != null && mp.phase() != lastPhase) { rebuild(); }
 		if (backdrop) { drawSky(g, cw, ch, nowMs); }
 		else { g.setColor(new Color(10, 0, 30, 170)); g.fillRect(0, 0, cw, ch); }
 
@@ -283,7 +402,7 @@ final class Menu
 		drawFancy(g, "of", big2, VW / 2.0 - 118, 104, 4f);
 		drawFancy(g, "MAGIC", big, VW / 2.0 + 14, 122, 6f);
 		g.setFont(new Font(Font.DIALOG, Font.BOLD, 15));
-		String sub = controlsPage ? "CONTROLS" : "PC SETTINGS";
+		String sub = controlsPage ? "CONTROLS" : (multiPage ? "MULTIPLAYER" : "PC SETTINGS");
 		FontMetrics fm = g.getFontMetrics();
 		g.setColor(new Color(0, 0, 0, 120));
 		g.drawString(sub, (int) (VW / 2.0 - fm.stringWidth(sub) / 2.0) + 1, 151);
@@ -343,7 +462,7 @@ final class Menu
 			FontMetrics fm = g.getFontMetrics();
 			double base = y + rowH / 2 + fm.getAscent() * 0.36;
 			String name = labelOf(it);
-			boolean centered = it == Item.PLAY || it == Item.QUIT || it == Item.CONTROLS || it == Item.RESTART;
+			boolean centered = CENTERED.contains(it);
 			if (it == Item.PLAY)
 			{
 				Font pf = new Font(Font.DIALOG, Font.BOLD, (int) Math.round(Math.min(21, rowH * 0.62)));
@@ -352,7 +471,7 @@ final class Menu
 			}
 			if (centered)
 			{
-				g.setColor(it == Item.PLAY ? new Color(0xFFE27A) : (it == Item.RESTART ? ACCENT : TEXT));
+				g.setColor(it == Item.PLAY || it == Item.MP_CREATE || it == Item.MP_JOIN ? new Color(0xFFE27A) : (it == Item.RESTART ? ACCENT : TEXT));
 				g.drawString(name, (float) (VW / 2.0 - fm.stringWidth(name) / 2.0), (float) base);
 				continue;
 			}
@@ -364,7 +483,11 @@ final class Menu
 			double vx = rowX1 - 26 - fm.stringWidth(v);
 			g.setColor(on ? Color.WHITE : DIM);
 			g.drawString(v, (float) vx, (float) base);
-			if (on)
+			if (on && FIELDS.contains(it))
+			{
+				if ((now / 450) % 2 == 0) { g.setColor(Color.WHITE); g.fillRect((int) (rowX1 - 22), (int) (y + rowH * 0.25), 2, (int) (rowH * 0.5)); }
+			}
+			else if (on && it != Item.MULTI && it != Item.MP_ROOM && it != Item.MP_FRIEND)
 			{
 				g.setColor(new Color(0xFFE27A));
 				drawArrow(g, vx - 14, y + rowH / 2, rowH * 0.18, -1);
@@ -378,7 +501,17 @@ final class Menu
 		g.fill(new RoundRectangle2D.Double(rowX0 - 10, iy, rowX1 - rowX0 + 20, 58, 14, 14));
 		g.setColor(TEXT);
 		g.setFont(new Font(Font.DIALOG, Font.PLAIN, 13));
-		drawWrapped(g, infoOf(items.get(sel)), rowX0 + 2, iy + 20, rowX1 - rowX0 - 4, 17, 3);
+		String info = infoOf(items.get(sel));
+		if (multiPage && mp != null)
+		{
+			String problem = !notice.isEmpty() ? notice : mp.error();
+			String line = (problem.isEmpty() ? "" : "! " + problem + "   ") + "Status: " + mp.status() + (mp.saveNote().isEmpty() ? "" : ". " + mp.saveNote());
+			g.setColor(problem.isEmpty() ? ACCENT : new Color(0xFF8A8A));
+			drawWrapped(g, line, rowX0 + 2, iy + 20, rowX1 - rowX0 - 4, 17, 2);
+			g.setColor(TEXT);
+			drawWrapped(g, info, rowX0 + 2, iy + 54, rowX1 - rowX0 - 4, 17, 1);
+		}
+		else { drawWrapped(g, info, rowX0 + 2, iy + 20, rowX1 - rowX0 - 4, 17, 3); }
 		g.setColor(DIM);
 		g.setFont(new Font(Font.DIALOG, Font.PLAIN, 12));
 		String hint = "Arrows: choose   Left/Right: change   Enter: select   " + (host.gameStarted() ? "Esc/F1: back to game" : "Mouse and controller work too");
@@ -473,6 +606,18 @@ final class Menu
 		{
 			case PLAY: return host.gameStarted() ? "RESUME" : "PLAY";
 			case EDITION: return "Game version";
+			case MULTI: return "Multiplayer";
+			case MP_NAME: return "Your name";
+			case MP_KEY: return "Room key";
+			case MP_CREATE: return "Create game";
+			case MP_CODE: return "Room code";
+			case MP_JOIN: return "Join game";
+			case MP_SERVER: return "Server";
+			case MP_SERVERKEY: return "Server key";
+			case MP_ROOM: return "Room code";
+			case MP_FRIEND: return "Friend";
+			case MP_LEAVE: return "Leave room";
+			case MP_BACK: return "Back";
 			case DISPLAY: return "Display";
 			case SIZE: return "Window size";
 			case FILTER: return "Image";
@@ -491,6 +636,14 @@ final class Menu
 		switch (it)
 		{
 			case EDITION: return s.edition().name;
+			case MULTI: return mp == null ? "" : (mp.inRoom() ? "Room " + mp.roomCode() : (mp.phase() == MultiSession.Phase.WORKING ? "Connecting..." : "Off"));
+			case MP_NAME: return s.playerName.isEmpty() ? "(type your name)" : s.playerName;
+			case MP_KEY: return s.roomKey.isEmpty() ? "(type a key, 4+ letters)" : s.roomKey;
+			case MP_CODE: return s.roomCode.isEmpty() ? "(from your friend)" : s.roomCode;
+			case MP_SERVER: { String u = s.serverUrl.replaceFirst("^https?://", ""); return u.length() > 30 ? u.substring(0, 28) + ".." : u; }
+			case MP_SERVERKEY: return s.serverKey.length() < 16 ? "Not set (paste with Ctrl+V)" : "Set (..." + s.serverKey.substring(s.serverKey.length() - 4) + ")";
+			case MP_ROOM: return mp.roomCode() + (mp.isHost() ? "  (you host)" : "");
+			case MP_FRIEND: return mp.friendName().isEmpty() ? "not here yet" : mp.friendName() + (mp.friendOnline() ? "  (online)" : "  (offline)");
 			case DISPLAY: return s.fullscreen ? "Fullscreen" : "Window";
 			case SIZE: return s.windowScale == 0 ? "Auto (" + host.autoWindowScale() + "x)" : s.windowScale + "x";
 			case FILTER: return Settings.FILTERS[s.filter];
@@ -517,6 +670,18 @@ final class Menu
 			case SOUND: return "Music and sound effects." + (host.gameStarted() && s.sound != startSound ? " Needs a restart." : "");
 			case FPS: return "Shows game and display frame rates in the corner. Shortcut: F3.";
 			case CONTROLS: return "Keyboard and controller buttons.";
+			case MULTI: return "Play online with a friend. Each of you plays your own game and sees the other as the yellow hero.";
+			case MP_NAME: return "Shown above your hero on your friend's screen.";
+			case MP_KEY: return "A secret word for your room. Your friend types the same key to join.";
+			case MP_CREATE: return "Open a room. Tell your friend the room code and the room key.";
+			case MP_CODE: return "The 6-letter code shown on the host's screen.";
+			case MP_JOIN: return "Join your friend's room. Do this before PLAY: you get the host's progress.";
+			case MP_SERVER: return "Address of your room server on Render.";
+			case MP_SERVERKEY: return "The ACCESS_KEY from Render. Copy it, select this row and press Ctrl+V.";
+			case MP_ROOM: return mp.isHost() ? "Tell your friend this code and the room key." : "You are in your friend's room.";
+			case MP_FRIEND: return "You see your friend as the yellow hero when you are in the same place.";
+			case MP_LEAVE: return mp.isHost() ? "Close the room for both of you." : "Leave the room.";
+			case MP_BACK: return "Back to the settings.";
 			case RESTART: return "Some changes only apply after restarting. Your progress is saved by the game itself.";
 			case QUIT: return "Close the game.";
 		}
