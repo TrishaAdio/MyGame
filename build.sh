@@ -70,3 +70,12 @@ mkdir -p "$D/licenses"
 cp "$F/LICENSE" "$D/licenses/FreeJ2ME-Plus-GPLv3.txt"
 ( cd "$HERE/dist" && zip -q -r -9 CastleOfMagic-PC.zip CastleOfMagic )
 ls -la "$HERE/dist"
+
+echo "== Windows installer"
+( cd "$HERE/installer"
+  cp "$HERE/dist/CastleOfMagic-PC.zip" payload.zip
+  GOOS=linux go run github.com/akavel/rsrc@v0.10.2 -ico ../launcher/icon.ico -manifest setup.manifest -arch amd64 -o rsrc_windows_amd64.syso
+  go test ./...
+  GOOS=windows GOARCH=amd64 go build -tags uninstaller -ldflags "-H windowsgui -s -w" -o uninstall.exe .
+  GOOS=windows GOARCH=amd64 go build -ldflags "-H windowsgui -s -w" -o "$HERE/dist/CastleOfMagic-Setup.exe" . )
+ls -la "$HERE/dist"
