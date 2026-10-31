@@ -1,7 +1,11 @@
-Castle of Magic PC - ready to play
+Castle of Magic PC
 
-1. Download CastleOfMagic-PC.zip
-2. Right-click it > Extract All
-3. Open the CastleOfMagic folder and double-click CastleOfMagic.exe
+EASIEST: download CastleOfMagic-Setup.exe and double-click it.
+It puts a "Castle of Magic" icon on your desktop.
+
+If Windows says "Windows protected your PC": click More info, then Run anyway.
+To remove the game: Settings > Apps > Installed apps > Castle of Magic > Uninstall.
+
+Without installing: download CastleOfMagic-PC.zip, extract it, double-click CastleOfMagic.exe.
 
 Personal use only.
