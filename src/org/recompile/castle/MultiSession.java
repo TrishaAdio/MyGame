@@ -89,11 +89,19 @@ final class MultiSession implements RoomClient.Listener
 
 	// ------------------------------------------------------------ actions (called from the menu)
 
+	/** Room keys ignore capital letters and spaces, so "Castle 99" and "castle99" are the same key. */
+	static String normalizeKey(String k) { return k == null ? "" : k.replaceAll("\\s+", "").toLowerCase(java.util.Locale.ROOT); }
+
+	static String normalizeCode(String c)
+	{
+		return c == null ? "" : c.toUpperCase(java.util.Locale.ROOT).replaceAll("[^A-Z0-9]", "");
+	}
+
 	String validate(boolean joining)
 	{
 		if (settings.playerName.trim().isEmpty()) { return "Type your name first"; }
-		if (settings.roomKey.length() < 4) { return "Room key must be at least 4 characters"; }
-		if (joining && settings.roomCode.trim().length() < 4) { return "Type the room code your friend gave you"; }
+		if (normalizeKey(settings.roomKey).length() < 4) { return "Room key must be at least 4 characters"; }
+		if (joining && normalizeCode(settings.roomCode).length() != 6) { return "The room code has 6 characters. You typed \"" + settings.roomCode + "\""; }
 		if (settings.serverKey.trim().length() < 16) { return "Paste the server key in Server settings first"; }
 		return null;
 	}
@@ -116,14 +124,25 @@ final class MultiSession implements RoomClient.Listener
 			{
 				if (!c.wakeUp()) { throw new IOException("Server not reachable. Check your internet and the server address."); }
 				status = joining ? "Joining room..." : "Creating room...";
-				RoomClient.Room r = joining
-					? c.join(settings.roomCode, settings.playerName.trim(), settings.roomKey)
-					: c.create(settings.playerName.trim(), settings.roomKey);
+				String key = normalizeKey(settings.roomKey);
+				String wanted = normalizeCode(settings.roomCode);
+				RoomClient.Room r;
+				try
+				{
+					r = joining ? c.join(wanted, settings.playerName.trim(), key) : c.create(settings.playerName.trim(), key);
+				}
+				catch (RoomClient.ApiException e)
+				{
+					if (joining && e.status == 403)
+					{
+						throw new RoomClient.ApiException(403, "No room " + wanted + " with key \"" + key + "\". Check both with your friend. If the host's game was closed or the server restarted, they must create a new room.");
+					}
+					throw e;
+				}
 				client = c;
 				role = r.role;
 				code = r.code;
-				settings.roomCode = r.code;
-				settings.save();
+				if (joining) { settings.roomCode = r.code; settings.save(); }
 				saveSynced = false;
 				saveNote = "";
 				phase = Phase.IN_ROOM;

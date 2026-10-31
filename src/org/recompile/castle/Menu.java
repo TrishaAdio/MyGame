@@ -50,6 +50,7 @@ final class Menu
 	private boolean multiPage;
 	private MultiSession.Phase lastPhase;
 	private String notice = "";
+	private Item editing;          // the field the player is typing in; arriving at another field starts fresh
 
 	synchronized void setMultiplayer(MultiSession session) { this.mp = session; rebuild(); }
 
@@ -211,7 +212,7 @@ final class Menu
 	{
 		if (!textSelected() || c < 32 || c == 127) { return; }
 		Item it = items.get(sel);
-		String v = fieldValue(it);
+		String v = startTyping(it);
 		if (v.length() >= fieldLimit(it)) { return; }
 		if (it == Item.MP_CODE) { c = Character.toUpperCase(c); if (!Character.isLetterOrDigit(c)) { return; } }
 		setField(it, v + c);
@@ -221,6 +222,7 @@ final class Menu
 	{
 		if (!textSelected()) { return; }
 		Item it = items.get(sel);
+		editing = it;
 		String v = fieldValue(it);
 		if (!v.isEmpty()) { setField(it, v.substring(0, v.length() - 1)); }
 	}
@@ -231,8 +233,19 @@ final class Menu
 		Item it = items.get(sel);
 		String clean = text.replaceAll("[\\r\\n\\t]", "").trim();
 		if (it == Item.MP_CODE) { clean = clean.toUpperCase().replaceAll("[^A-Z0-9]", ""); }
-		String v = fieldValue(it) + clean;
+		String v = startTyping(it) + clean;
 		setField(it, v.length() > fieldLimit(it) ? v.substring(0, fieldLimit(it)) : v);
+	}
+
+	/** The first key typed into the room code or room key replaces the old text instead of adding to it. */
+	private String startTyping(Item it)
+	{
+		if (editing != it)
+		{
+			editing = it;
+			if (it == Item.MP_CODE || it == Item.MP_KEY) { setField(it, ""); }
+		}
+		return fieldValue(it);
 	}
 
 	private int fieldLimit(Item it)
@@ -672,9 +685,9 @@ final class Menu
 			case CONTROLS: return "Keyboard and controller buttons.";
 			case MULTI: return "Play online with a friend. Each of you plays your own game and sees the other as the yellow hero.";
 			case MP_NAME: return "Shown above your hero on your friend's screen.";
-			case MP_KEY: return "A secret word for your room. Your friend types the same key to join.";
+			case MP_KEY: return "A secret word for your room (capital letters don't matter). Your friend types the same key.";
 			case MP_CREATE: return "Open a room. Tell your friend the room code and the room key.";
-			case MP_CODE: return "The 6-letter code shown on the host's screen.";
+			case MP_CODE: return "The 6-letter code on the host's screen. Typing replaces the old code. Codes never use 0, O, 1 or I.";
 			case MP_JOIN: return "Join your friend's room. Do this before PLAY: you get the host's progress.";
 			case MP_SERVER: return "Address of your room server on Render.";
 			case MP_SERVERKEY: return "The ACCESS_KEY from Render. Copy it, select this row and press Ctrl+V.";

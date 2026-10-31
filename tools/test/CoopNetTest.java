@@ -31,7 +31,7 @@ public class CoopNetTest
 
 		Settings s = new Settings(new File(out + ".properties"));
 		s.playerName = host ? "Anirban" : "Friend";
-		s.roomKey = "castle-4321";
+		s.roomKey = System.getProperty(host ? "hostKey" : "guestKey", "castle-4321");
 		s.serverUrl = server;
 		s.serverKey = key;
 		mp = new MultiSession(s, new File("."), () -> started);
@@ -46,7 +46,8 @@ public class CoopNetTest
 		else
 		{
 			waitFor(() -> new File(codeFile).isFile(), 60000);
-			s.roomCode = Files.readString(new File(codeFile).toPath()).trim();
+			s.roomCode = System.getProperty("codeMangle", "").replace("CODE", Files.readString(new File(codeFile).toPath()).trim().toLowerCase());
+			if (s.roomCode.isEmpty()) { s.roomCode = Files.readString(new File(codeFile).toPath()).trim(); }
 			mp.join();
 			waitFor(() -> mp.inRoom() || !mp.error().isEmpty(), 30000);
 			System.out.println("GUEST joined room=" + mp.roomCode() + " error=" + mp.error());
