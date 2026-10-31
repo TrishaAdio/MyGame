@@ -116,10 +116,17 @@ public final class CastleOfMagicPC implements Menu.Host
 		WinNative.startGamepadThread(app::padButton);
 	}
 
+	private final MultiSession mp;
+	private final Coop coop = new Coop();
+	private volatile int friendX = -9999, friendY = -9999;
+	private volatile String friendPlace = "";
+
 	private CastleOfMagicPC(Settings s)
 	{
 		this.settings = s;
 		this.menu = new Menu(s, this, loadIcon(s));
+		this.mp = new MultiSession(s, new File("saves" + File.separator + "adventure"), () -> started);
+		this.menu.setMultiplayer(mp);
 	}
 
 	private static Image loadIcon(Settings s)
@@ -159,6 +166,7 @@ public final class CastleOfMagicPC implements Menu.Host
 		KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(e -> {
 			java.awt.Window w = e.getComponent() == null ? null : (e.getComponent() instanceof java.awt.Window ww ? ww : SwingUtilities.getWindowAncestor(e.getComponent()));
 			if (w != frame) { return false; } // let dialogs handle their own keys
+			if (e.getID() == KeyEvent.KEY_TYPED) { if (menuOpen && menu.textSelected() && !e.isControlDown() && !e.isAltDown()) { menu.typed(e.getKeyChar()); } return true; }
 			if (e.getID() == KeyEvent.KEY_PRESSED) { keyDown(e); }
 			else if (e.getID() == KeyEvent.KEY_RELEASED) { keyUp(e); }
 			return true; // we handle every key (also stops Alt/F10 from stealing focus)
@@ -353,6 +361,7 @@ public final class CastleOfMagicPC implements Menu.Host
 					g.fillRect(0, 0, cw, ch);
 					Settings.Edition e = displayEdition();
 					if (started && scaler.hasFrame()) { scaler.draw(g, gc, cw, ch, e.width, e.height, settings.filter); }
+					if (started && !menuOpen && mp.inRoom()) { drawMultiplayer(g, cw, ch, e); }
 					if (menuOpen) { menu.draw(g, cw, ch, !started, System.currentTimeMillis()); }
 					if (settings.showFps) { drawStats(g); }
 				}
@@ -364,6 +373,66 @@ public final class CastleOfMagicPC implements Menu.Host
 		while (strategy.contentsLost());
 		Toolkit.getDefaultToolkit().sync();
 		displayFrames++;
+	}
+
+	/** Friend bar, name tags and messages, drawn on top of the game picture. */
+	private void drawMultiplayer(Graphics2D g, int cw, int ch, Settings.Edition e)
+	{
+		g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+		g.setRenderingHint(java.awt.RenderingHints.KEY_TEXT_ANTIALIASING, java.awt.RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+		Rectangle r = Scaler.fit(cw, ch, e.width, e.height, settings.filter == 1);
+		double k = r.width / (double) e.width;
+		int fs = (int) Math.max(12, Math.round(7 * k));
+
+		// friend bar
+		Coop.State f = mp.friend();
+		String bar;
+		if (!mp.friendOnline()) { bar = mp.isHost() ? "Room " + mp.roomCode() + ": waiting for your friend" : "Waiting for " + (mp.friendName().isEmpty() ? "the host" : mp.friendName()); }
+		else { bar = mp.friendName() + " (yellow): " + (f == null ? "..." : f.place); }
+		g.setFont(new Font(Font.DIALOG, Font.BOLD, fs));
+		java.awt.FontMetrics fm = g.getFontMetrics();
+		int bw = fm.stringWidth(bar) + fs * 2, bh = fm.getHeight() + fs / 2;
+		int bx = r.x + (r.width - bw) / 2, by = r.y + (int) (34 * k);
+		g.setColor(new Color(20, 8, 50, 190));
+		g.fillRoundRect(bx, by, bw, bh, bh, bh);
+		g.setColor(new Color(0xFFD84A));
+		g.fillOval(bx + fs / 2, by + bh / 2 - fs / 4, fs / 2, fs / 2);
+		g.setColor(Color.WHITE);
+		g.drawString(bar, bx + fs + fs / 4, by + (bh + fm.getAscent()) / 2 - 2);
+
+		// name tag above the yellow hero
+		int fx = friendX, fy = friendY;
+		if (fx > -9000 && !mp.friendName().isEmpty())
+		{
+			String n = mp.friendName();
+			g.setFont(new Font(Font.DIALOG, Font.BOLD, Math.max(11, fs - 2)));
+			fm = g.getFontMetrics();
+			int tx = r.x + (int) Math.round(fx * k), ty = r.y + (int) Math.round((fy - 44) * k);
+			int tw = fm.stringWidth(n) + 10;
+			ty = Math.max(r.y + 2, Math.min(r.y + r.height - fm.getHeight() - 2, ty));
+			tx = Math.max(r.x + 2, Math.min(r.x + r.width - tw - 2, tx - tw / 2));
+			g.setColor(new Color(0, 0, 0, 150));
+			g.fillRoundRect(tx, ty, tw, fm.getHeight(), 8, 8);
+			g.setColor(new Color(0xFFE27A));
+			g.drawString(n, tx + 5, ty + fm.getAscent());
+		}
+
+		// messages
+		java.util.List<String> msgs = mp.toasts();
+		g.setFont(new Font(Font.DIALOG, Font.BOLD, Math.max(11, fs - 1)));
+		fm = g.getFontMetrics();
+		int my = r.y + r.height - (int) (40 * k);
+		for (int i = msgs.size() - 1; i >= 0; i--)
+		{
+			String m = msgs.get(i);
+			int mw = Math.min(r.width - 16, fm.stringWidth(m) + 16);
+			int mx = r.x + (r.width - mw) / 2;
+			g.setColor(new Color(20, 8, 50, 200));
+			g.fillRoundRect(mx, my - fm.getHeight(), mw, fm.getHeight() + 6, 10, 10);
+			g.setColor(Color.WHITE);
+			g.drawString(m, mx + 8, my - 2);
+			my -= fm.getHeight() + 10;
+		}
 	}
 
 	private void drawStats(Graphics2D g)
@@ -416,11 +485,6 @@ public final class CastleOfMagicPC implements Menu.Host
 			return false;
 		}
 
-		Pacer.origMs = edition.origMs;
-		Pacer.origW = 16;
-		Pacer.stepW = settings.stepW();
-		Pacer.smooth = settings.smooth();
-
 		Mobile.setPlatform(new MobilePlatform(edition.width, edition.height), () -> { });
 		MobilePlatform platform = Mobile.getPlatform();
 		platform.dataPath = "saves" + File.separator + edition.id + File.separator; // separate saves per version
@@ -435,7 +499,7 @@ public final class CastleOfMagicPC implements Menu.Host
 		Mobile.config.settings.put("scrheight", "" + edition.height);
 		Mobile.config.settings.put("phone", "Standard");
 		Mobile.config.settings.put("rotate", "0");
-		Mobile.config.settings.put("fps", "0");          // pacing is done by Pacer, not by the runtime's limiter
+		Mobile.config.settings.put("fps", "0");          // no extra limiter: the game paces itself, exactly as on the phone
 		Mobile.config.settings.put("fpshack", "Disabled");
 		Mobile.config.sysSettings.put("sound", settings.sound ? "on" : "off");
 		Mobile.config.sysSettings.put("fpsCounterPosition", "Off");
@@ -452,6 +516,15 @@ public final class CastleOfMagicPC implements Menu.Host
 	{
 		if (MobilePlatform.appTerminated) { SwingUtilities.invokeLater(this::quit); return; }
 		PlatformImage fb = Mobile.getPlatform().getLcdFrontbuffer();
+		if (edition != null && "adventure".equals(edition.id) && mp.inRoom())
+		{
+			Coop.State mine = coop.capture();
+			mp.publish(mine);
+			int[] pos = new int[2];
+			fb = coop.drawFriend(fb, mine, mp.friend(), pos);
+			friendX = pos[0]; friendY = pos[1];
+		}
+		else { friendX = friendY = -9999; }
 		int w = fb.getWidth(), h = fb.getHeight();
 		int[] data = fb.getDataBuffer();
 		synchronized (frameLock)
@@ -469,6 +542,7 @@ public final class CastleOfMagicPC implements Menu.Host
 	@Override public void quit()
 	{
 		running = false;
+		try { mp.leave(); Thread.sleep(300); } catch (Exception ignored) { }
 		settings.save();
 		System.exit(0);
 	}
@@ -504,6 +578,27 @@ public final class CastleOfMagicPC implements Menu.Host
 		if ((code == KeyEvent.VK_ENTER && e.isAltDown()) || code == KeyEvent.VK_F11) { if (!isRepeat(e)) { toggleFullscreen(); } return; }
 		if (code == KeyEvent.VK_F3) { if (!isRepeat(e)) { settings.showFps = !settings.showFps; settings.save(); } return; }
 		if (code == KeyEvent.VK_F12) { if (!isRepeat(e)) { screenshot(); } return; }
+
+		if (menuOpen && menu.textSelected())
+		{
+			switch (code)
+			{
+				case KeyEvent.VK_UP: menu.up(); break;
+				case KeyEvent.VK_DOWN: case KeyEvent.VK_TAB: menu.down(); break;
+				case KeyEvent.VK_ENTER: if (!isRepeat(e)) { menu.activate(); } break;
+				case KeyEvent.VK_ESCAPE: if (!isRepeat(e)) { menu.back(); } break;
+				case KeyEvent.VK_BACK_SPACE: menu.backspace(); break;
+				case KeyEvent.VK_V:
+					if (e.isControlDown())
+					{
+						try { menu.paste((String) Toolkit.getDefaultToolkit().getSystemClipboard().getData(java.awt.datatransfer.DataFlavor.stringFlavor)); }
+						catch (Exception ignored) { }
+					}
+					break;
+				default:
+			}
+			return;
+		}
 
 		if (menuOpen)
 		{

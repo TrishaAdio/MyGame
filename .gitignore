@@ -17,3 +17,11 @@ config/
 logs/
 screenshots/
 freej2me_system/
+
+# Server dependencies
+node_modules/
+
+# Installer build outputs
+installer/payload.zip
+installer/*.exe
+installer/*.syso

@@ -3,6 +3,7 @@
 #
 #   ./build.sh <folder with the original Castle of Magic jars>
 #
+# The game jars are packaged byte-for-byte unchanged.
 # Needs: JDK 25, Go 1.22+, git, curl, unzip, zip. Output: dist/CastleOfMagic-PC.zip
 set -euo pipefail
 
@@ -13,7 +14,6 @@ CACHE="$HERE/.cache"
 JAVA_HOME="${JAVA_HOME:-/root/.local/share/mise/installs/java/25}"
 J="$JAVA_HOME/bin"
 FREEJ2ME_COMMIT=3933e75
-ASM_VER=9.8
 JRE_URL="https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.5%2B8/OpenJDK25U-jre_x64_windows_hotspot_25.0.5_8.zip"
 
 ADV="$SRC_JARS/Castle of Magic (2008)(Gameloft SA)(v1.0.2)(a8).jar"   # 240x320 full adventure
@@ -28,18 +28,11 @@ fi
 git -C "$CACHE/freej2me-plus" checkout -q "$FREEJ2ME_COMMIT" 2>/dev/null || git -C "$CACHE/freej2me-plus" fetch -q --unshallow || true
 F="$CACHE/freej2me-plus"
 
-echo "== ASM $ASM_VER (build tools only)"
-for a in asm asm-tree; do
-  [ -f "$CACHE/$a.jar" ] || curl -sSfL -o "$CACHE/$a.jar" "https://repo1.maven.org/maven2/org/ow2/asm/$a/$ASM_VER/$a-$ASM_VER.jar"
-done
-TOOLCP="$CACHE/asm.jar:$CACHE/asm-tree.jar"
-mkdir -p "$B/tools"
-"$J/javac" -cp "$TOOLCP" -d "$B/tools" "$HERE/tools/Patcher.java"
-
-echo "== Patch game jars"
+echo "== Game files (copied unchanged)"
 mkdir -p "$B/games"
-"$J/java" -cp "$TOOLCP:$B/tools" Patcher "$HD"  "$B/games/platformer.jar" "$HERE/patches/platformer.gates"
-"$J/java" -cp "$TOOLCP:$B/tools" Patcher "$ADV" "$B/games/adventure.jar"  "$HERE/patches/adventure.gates"
+cp "$HD"  "$B/games/platformer.jar"
+cp "$ADV" "$B/games/adventure.jar"
+cmp "$HD" "$B/games/platformer.jar" && cmp "$ADV" "$B/games/adventure.jar" && echo "identical to the originals"
 
 echo "== Compile runtime + PC front end"
 rm -rf "$B/jar" && mkdir -p "$B/jar"
@@ -76,4 +69,13 @@ cp "$HERE/README.txt" "$D/"
 mkdir -p "$D/licenses"
 cp "$F/LICENSE" "$D/licenses/FreeJ2ME-Plus-GPLv3.txt"
 ( cd "$HERE/dist" && zip -q -r -9 CastleOfMagic-PC.zip CastleOfMagic )
+ls -la "$HERE/dist"
+
+echo "== Windows installer"
+( cd "$HERE/installer"
+  cp "$HERE/dist/CastleOfMagic-PC.zip" payload.zip
+  GOOS=linux go run github.com/akavel/rsrc@v0.10.2 -ico ../launcher/icon.ico -manifest setup.manifest -arch amd64 -o rsrc_windows_amd64.syso
+  go test ./...
+  GOOS=windows GOARCH=amd64 go build -tags uninstaller -ldflags "-H windowsgui -s -w" -o uninstall.exe .
+  GOOS=windows GOARCH=amd64 go build -ldflags "-H windowsgui -s -w" -o "$HERE/dist/CastleOfMagic-Setup.exe" . )
 ls -la "$HERE/dist"
